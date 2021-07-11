@@ -1,38 +1,174 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import styled from 'styled-components'
+import produce from 'immer'
+import { randomID } from './util'
+import { api } from './api'
 import { Header as _Header } from './Header'
 import { Column } from './Column'
+import { DeleteDialog } from './DeleteDialog'
+import { Overlay as _Overlay } from './Overlay'
+
+type Columns = {
+  id: string
+  title?: string
+  text?: string
+  cards?: {
+    id: string
+    text?: string
+  }[]
+}[]
 
 export function App() {
+  const [filterValue, setFilterValue] = useState('')
+  const [columns, setColumns] = useState<Columns>([])
+
+  useEffect(() => {
+    // App コンポーネントのマウント時、つまり画面の表示タイミングで API を呼び出している
+    ;(async () => {
+      // カラム（TODO、DOingなど）の呼び出し
+      const columns = await api('GET /v1/columns', null)
+
+      setColumns(columns)
+      // カード（タスク）の呼び出し
+      const unorderedCards = await api('GET /v1/cards', null)
+
+      setColumns(
+        produce((columns: Columns) => {
+          columns.forEach(column => {
+            column.cards = unorderedCards
+          })
+        }),
+      )
+    })()
+  }, [])
+
+  const [draggingCardID, setDraggingCardID] = useState<string | undefined>(
+    undefined,
+  )
+
+  const dropCardTo = (toID: string) => {
+    const fromID = draggingCardID
+    if (!fromID) return
+
+    setDraggingCardID(undefined)
+
+    if (fromID === toID) return
+
+    setColumns(
+      produce((columns: Columns) => {
+        const card = columns
+          .flatMap(col => col.cards ?? [])
+          .find(c => c.id === fromID)
+        if (!card) return
+
+        const fromColumn = columns.find(col =>
+          col.cards?.some(c => c.id === fromID),
+        )
+        if (!fromColumn?.cards) return
+
+        fromColumn.cards = fromColumn.cards.filter(c => c.id !== fromID)
+
+        const toColumn = columns.find(
+          col => col.id === toID || col.cards?.some(c => c.id === toID),
+        )
+        if (!toColumn?.cards) return
+
+        let index = toColumn.cards.findIndex(c => c.id === toID)
+        if (index < 0) {
+          index = toColumn.cards.length
+        }
+        toColumn.cards.splice(index, 0, card)
+      }),
+    )
+  }
+
+  const setText = (columnID: string, value: string) => {
+    setColumns(
+      produce((columns: Columns) => {
+        const column = columns.find(c => c.id === columnID)
+        if (!column) return
+
+        column.text = value
+      }),
+    )
+  }
+
+  const addCard = (columnID: string) => {
+    const column = columns.find(c => c.id === columnID)
+    if (!column) return
+
+    const text = column.text
+    const cardID = randomID()
+
+    setColumns(
+      produce((columns: Columns) => {
+        const column = columns.find(c => c.id === columnID)
+        if (!column) return
+
+        column.cards?.unshift({
+          id: cardID,
+          text: column.text,
+        })
+        column.text = ''
+      }),
+    )
+
+    api('POST /v1/cards', {
+      id: cardID,
+      text,
+    })
+  }
+
+  const [deletingCardID, setDeletingCardID] = useState<string | undefined>(
+    undefined,
+  )
+  const deleteCard = () => {
+    const cardID = deletingCardID
+    if (!cardID) return
+
+    setDeletingCardID(undefined)
+
+    setColumns(
+      produce((columns: Columns) => {
+        const column = columns.find(col =>
+          col.cards?.some(c => c.id === cardID),
+        )
+        if (!column) return
+
+        column.cards = column.cards?.filter(c => c.id !== cardID)
+      }),
+    )
+  }
+
   return (
     <Container>
-      <Header />
+      <Header filterValue={filterValue} onFilterChange={setFilterValue} />
       <MainArea>
         <HorizontalScroll>
-          <Column
-            title="TODO"
-            cards={[
-              { id: 'a', text: '朝食をとる' },
-              { id: 'b', text: 'SNSをチェックする' },
-              { id: 'c', text: '布団に入る' },
-            ]}
-          />
-          <Column
-            title="Doing"
-            cards={[
-              { id: 'd', text: '顔を洗う' },
-              { id: 'e', text: '歯を磨く' },
-            ]}
-          />
-
-          <Column title="Waiting" cards={[]} />
-
-          <Column
-            title="Done"
-            cards={[{ id: 'f', text: '布団から出る (:3っ)っ -=三[＿＿]' }]}
-          />
+          {columns.map(({ id: columnID, title, cards, text }) => (
+            <Column
+              key={columnID}
+              title={title}
+              filterValue={filterValue}
+              cards={cards}
+              onCardDragStart={cardID => setDraggingCardID(cardID)}
+              onCardDrop={entered => dropCardTo(entered ?? columnID)}
+              onCardDeleteClick={cardID => setDeletingCardID(cardID)}
+              text={text}
+              onTextChange={value => setText(columnID, value)}
+              onTextConfirm={() => addCard(columnID)}
+            />
+          ))}
         </HorizontalScroll>
       </MainArea>
+      {deletingCardID && (
+        <Overlay onClick={() => setDeletingCardID(undefined)}>
+          <DeleteDialog
+            onConfirm={deleteCard}
+            onCancel={() => setDeletingCardID(undefined)}
+          />
+        </Overlay>
+      )}
     </Container>
   )
 }
@@ -70,4 +206,9 @@ const HorizontalScroll = styled.div`
     flex: 0 0 16px;
     content: '';
   }
+`
+const Overlay = styled(_Overlay)`
+  display: flex;
+  justify-content: center;
+  align-items: center;
 `
