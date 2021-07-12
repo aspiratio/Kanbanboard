@@ -1,26 +1,39 @@
 import React, { useState, useEffect } from 'react'
 import styled from 'styled-components'
+import { useDispatch, useSelector } from 'react-redux'
 import produce from 'immer'
-import { randomID } from './util'
-import { api } from './api'
+import { randomID, sortBy, reorderPatch } from './util'
+import { api, ColumnID, CardID } from './api'
 import { Header as _Header } from './Header'
 import { Column } from './Column'
 import { DeleteDialog } from './DeleteDialog'
 import { Overlay as _Overlay } from './Overlay'
 
-type Columns = {
-  id: string
-  title?: string
-  text?: string
-  cards?: {
-    id: string
+type State = {
+  columns?: {
+    id: ColumnID
+    title?: string
     text?: string
+    cards?: {
+      id: CardID
+      text?: string
+    }[]
   }[]
-}[]
+  cardsOrder: Record<string, CardID | ColumnID> // columnごとの順序情報
+}
 
 export function App() {
-  const [filterValue, setFilterValue] = useState('')
-  const [columns, setColumns] = useState<Columns>([])
+  const dispatch = useDispatch() // dispatchを取得するフック
+  const filterValue = useSelector(state => state.filterValue)
+  const setFilterValue = (value: string) =>
+    dispatch({
+      type: 'Filter.SetFilter',
+      payload: {
+        value,
+      },
+    })
+
+  const [{ columns, cardsOrder }, setData] = useState<State>({ cardsOrder: {} })
 
   useEffect(() => {
     // App コンポーネントのマウント時、つまり画面の表示タイミングで API を呼び出している
@@ -28,25 +41,33 @@ export function App() {
       // カラム（TODO、DOingなど）の呼び出し
       const columns = await api('GET /v1/columns', null)
 
-      setColumns(columns)
+      setData(
+        produce((draft: State) => {
+          draft.columns = columns
+        }),
+      )
       // カード（タスク）の呼び出し
-      const unorderedCards = await api('GET /v1/cards', null)
+      const [unorderedCards, cardsOrder] = await Promise.all([
+        api('GET /v1/cards', null),
+        api('GET /v1/cardsOrder', null),
+      ])
 
-      setColumns(
-        produce((columns: Columns) => {
-          columns.forEach(column => {
-            column.cards = unorderedCards
+      setData(
+        produce((draft: State) => {
+          draft.cardsOrder = cardsOrder
+          draft.columns?.forEach(column => {
+            column.cards = sortBy(unorderedCards, cardsOrder, column.id)
           })
         }),
       )
     })()
   }, [])
 
-  const [draggingCardID, setDraggingCardID] = useState<string | undefined>(
+  const [draggingCardID, setDraggingCardID] = useState<CardID | undefined>(
     undefined,
   )
 
-  const dropCardTo = (toID: string) => {
+  const dropCardTo = (toID: CardID | ColumnID) => {
     const fromID = draggingCardID
     if (!fromID) return
 
@@ -54,38 +75,28 @@ export function App() {
 
     if (fromID === toID) return
 
-    setColumns(
-      produce((columns: Columns) => {
-        const card = columns
-          .flatMap(col => col.cards ?? [])
-          .find(c => c.id === fromID)
-        if (!card) return
+    const patch = reorderPatch(cardsOrder, fromID, toID)
 
-        const fromColumn = columns.find(col =>
-          col.cards?.some(c => c.id === fromID),
-        )
-        if (!fromColumn?.cards) return
-
-        fromColumn.cards = fromColumn.cards.filter(c => c.id !== fromID)
-
-        const toColumn = columns.find(
-          col => col.id === toID || col.cards?.some(c => c.id === toID),
-        )
-        if (!toColumn?.cards) return
-
-        let index = toColumn.cards.findIndex(c => c.id === toID)
-        if (index < 0) {
-          index = toColumn.cards.length
+    setData(
+      produce((draft: State) => {
+        draft.cardsOrder = {
+          ...draft.cardsOrder,
+          ...patch,
         }
-        toColumn.cards.splice(index, 0, card)
+
+        const unorderedCards = draft.columns?.flatMap(c => c.cards ?? []) ?? []
+        draft.columns?.forEach(column => {
+          column.cards = sortBy(unorderedCards, draft.cardsOrder, column.id)
+        })
       }),
     )
+    api('PATCH /v1/cardsOrder', patch)
   }
 
-  const setText = (columnID: string, value: string) => {
-    setColumns(
-      produce((columns: Columns) => {
-        const column = columns.find(c => c.id === columnID)
+  const setText = (columnID: ColumnID, value: string) => {
+    setData(
+      produce((draft: State) => {
+        const column = draft.columns?.find(c => c.id === columnID)
         if (!column) return
 
         column.text = value
@@ -93,23 +104,29 @@ export function App() {
     )
   }
 
-  const addCard = (columnID: string) => {
-    const column = columns.find(c => c.id === columnID)
+  const addCard = (columnID: ColumnID) => {
+    const column = columns?.find(c => c.id === columnID)
     if (!column) return
 
     const text = column.text
-    const cardID = randomID()
+    const cardID = randomID() as CardID
 
-    setColumns(
-      produce((columns: Columns) => {
-        const column = columns.find(c => c.id === columnID)
-        if (!column) return
+    const patch = reorderPatch(cardsOrder, cardID, cardsOrder[columnID])
 
-        column.cards?.unshift({
+    setData(
+      produce((draft: State) => {
+        const column = draft.columns?.find(c => c.id === columnID)
+        if (!column?.cards) return
+
+        column.cards.unshift({
           id: cardID,
           text: column.text,
         })
         column.text = ''
+        draft.cardsOrder = {
+          ...draft.cardsOrder,
+          ...patch,
+        }
       }),
     )
 
@@ -117,9 +134,10 @@ export function App() {
       id: cardID,
       text,
     })
+    api('PATCH /v1/cardsOrder', patch)
   }
 
-  const [deletingCardID, setDeletingCardID] = useState<string | undefined>(
+  const [deletingCardID, setDeletingCardID] = useState<CardID | undefined>(
     undefined,
   )
   const deleteCard = () => {
@@ -128,16 +146,27 @@ export function App() {
 
     setDeletingCardID(undefined)
 
-    setColumns(
-      produce((columns: Columns) => {
-        const column = columns.find(col =>
+    const patch = reorderPatch(cardsOrder, cardID)
+
+    setData(
+      produce((draft: State) => {
+        const column = draft.columns?.find(col =>
           col.cards?.some(c => c.id === cardID),
         )
-        if (!column) return
+        if (!column?.cards) return
 
-        column.cards = column.cards?.filter(c => c.id !== cardID)
+        column.cards = column.cards.filter(c => c.id !== cardID)
+
+        draft.cardsOrder = {
+          ...draft.cardsOrder,
+          ...patch,
+        }
       }),
     )
+    api('DELETE /v1/cards', {
+      id: cardID,
+    })
+    api('PATCH /v1/cardsOrder', patch)
   }
 
   return (
@@ -145,20 +174,24 @@ export function App() {
       <Header filterValue={filterValue} onFilterChange={setFilterValue} />
       <MainArea>
         <HorizontalScroll>
-          {columns.map(({ id: columnID, title, cards, text }) => (
-            <Column
-              key={columnID}
-              title={title}
-              filterValue={filterValue}
-              cards={cards}
-              onCardDragStart={cardID => setDraggingCardID(cardID)}
-              onCardDrop={entered => dropCardTo(entered ?? columnID)}
-              onCardDeleteClick={cardID => setDeletingCardID(cardID)}
-              text={text}
-              onTextChange={value => setText(columnID, value)}
-              onTextConfirm={() => addCard(columnID)}
-            />
-          ))}
+          {!columns ? (
+            <Loading />
+          ) : (
+            columns.map(({ id: columnID, title, cards, text }) => (
+              <Column
+                key={columnID}
+                title={title}
+                filterValue={filterValue}
+                cards={cards}
+                onCardDragStart={cardID => setDraggingCardID(cardID)}
+                onCardDrop={entered => dropCardTo(entered ?? columnID)}
+                onCardDeleteClick={cardID => setDeletingCardID(cardID)}
+                text={text}
+                onTextChange={value => setText(columnID, value)}
+                onTextConfirm={() => addCard(columnID)}
+              />
+            ))
+          )}
         </HorizontalScroll>
       </MainArea>
       {deletingCardID && (
@@ -207,6 +240,13 @@ const HorizontalScroll = styled.div`
     content: '';
   }
 `
+
+const Loading = styled.div.attrs({
+  children: 'Loading...',
+})`
+  font-size: 14px;
+`
+
 const Overlay = styled(_Overlay)`
   display: flex;
   justify-content: center;
