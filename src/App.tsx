@@ -10,14 +10,6 @@ import { Overlay as _Overlay } from './Overlay'
 
 export function App() {
   const dispatch = useDispatch() // dispatchを取得するフック
-  const filterValue = useSelector(state => state.filterValue)
-  const setFilterValue = (value: string) =>
-    dispatch({
-      type: 'Filter.SetFilter',
-      payload: {
-        value,
-      },
-    })
 
   const columns = useSelector(state => state.columns)
   const cardsOrder = useSelector(state => state.cardsOrder)
@@ -126,7 +118,7 @@ export function App() {
 
   return (
     <Container>
-      <Header filterValue={filterValue} onFilterChange={setFilterValue} />
+      <Header />
       <MainArea>
         <HorizontalScroll>
           {!columns ? (
@@ -136,7 +128,6 @@ export function App() {
               <Column
                 key={columnID}
                 title={title}
-                filterValue={filterValue}
                 cards={cards}
                 onCardDragStart={cardID => setDraggingCardID(cardID)}
                 onCardDrop={entered => dropCardTo(entered ?? columnID)}

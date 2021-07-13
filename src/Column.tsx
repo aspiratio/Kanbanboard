@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import styled from 'styled-components'
+import { useSelector } from 'react-redux'
 import * as color from './color'
 import { Card } from './Card'
 import { PlusIcon } from './icon'
@@ -8,7 +9,6 @@ import { CardID } from './api'
 
 export function Column({
   title,
-  filterValue: rawFilterValue,
   cards: rawCards,
   onCardDragStart,
   onCardDrop,
@@ -19,7 +19,6 @@ export function Column({
   onTextCancel,
 }: {
   title?: string //?がつくと省略可能を表す
-  filterValue?: string
   cards?: {
     id: CardID
     text?: string
@@ -32,10 +31,10 @@ export function Column({
   onTextConfirm?(): void
   onTextCancel?(): void
 }) {
-  const filterValue = rawFilterValue?.trim() // 検索文字から空白を除去
+  const filterValue = useSelector(state => state.filterValue.trim()) // 検索文字から空白を除去
   // filterValueをtoLowerCaseで全て小文字に変換 正規表現とsplit()で空白ごとに区切った配列を作成
   // ?? をつけることで左辺がnullかundefinedのときだけ右辺（ここでは空配列）を返す
-  const keywords = filterValue?.toLowerCase().split(/\s+/g) ?? []
+  const keywords = filterValue.toLowerCase().split(/\s+/g) ?? []
   // textはrawCardsのtext要素
   // 小文字に変換 小文字に変換したtextのなかにkeywordsの全要素の文字列が含まれるかチェック（含まれればtrue）
   // rawCardsの全要素分、上記操作を繰り返し、trueになった要素だけで配列を作りcardsに代入
