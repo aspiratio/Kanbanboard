@@ -19,7 +19,7 @@ type State = {
       text?: string
     }[]
   }[]
-  cardsOrder: Record<string, CardID | ColumnID> // columnごとの順序情報
+  cardsOrder: Record<string, CardID | ColumnID | null> // columnごとの順序情報
 }
 
 export function App() {
@@ -33,7 +33,10 @@ export function App() {
       },
     })
 
-  const [{ columns, cardsOrder }, setData] = useState<State>({ cardsOrder: {} })
+  const columns = useSelector(state => state.columns)
+  const cardsOrder = useSelector(state => state.cardsOrder)
+  // TODO ビルドを通すためだけのスタブ実装なので、ちゃんとしたものにする
+  const setData = fn => fn({ cardsOrder: {} })
 
   useEffect(() => {
     // App コンポーネントのマウント時、つまり画面の表示タイミングで API を呼び出している
@@ -41,27 +44,28 @@ export function App() {
       // カラム（TODO、DOingなど）の呼び出し
       const columns = await api('GET /v1/columns', null)
 
-      setData(
-        produce((draft: State) => {
-          draft.columns = columns
-        }),
-      )
+      dispatch({
+        type: 'App.SetColumns',
+        payload: {
+          columns,
+        },
+      })
+
       // カード（タスク）の呼び出し
       const [unorderedCards, cardsOrder] = await Promise.all([
         api('GET /v1/cards', null),
         api('GET /v1/cardsOrder', null),
       ])
 
-      setData(
-        produce((draft: State) => {
-          draft.cardsOrder = cardsOrder
-          draft.columns?.forEach(column => {
-            column.cards = sortBy(unorderedCards, cardsOrder, column.id)
-          })
-        }),
-      )
+      dispatch({
+        type: 'App.SetCards',
+        payload: {
+          cards: unorderedCards,
+          cardsOrder,
+        },
+      })
     })()
-  }, [])
+  }, [dispatch])
 
   const [draggingCardID, setDraggingCardID] = useState<CardID | undefined>(
     undefined,
