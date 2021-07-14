@@ -59,7 +59,7 @@ export async function api<K extends keyof ReqAndRes>(
   }
 
   let pathWithID = ''
-  const option: RequestInit = { method } // 該当箇所
+  const option: RequestInit = { method }
   switch (option.method) {
     case 'GET':
     case 'DELETE':
@@ -82,24 +82,21 @@ export async function api<K extends keyof ReqAndRes>(
       break
   }
 
-  return fetch(`${Endpoint}${pathWithID || path}`, option).then(
-    (
-      res, // 該当箇所
-    ) =>
-      res.ok
-        ? res.json()
-        : res.text().then(text => {
-            throw new APIError(
-              method,
-              res.url,
-              res.status,
-              res.statusText,
-              res.ok,
-              res.redirected,
-              res.type,
-              text,
-            )
-          }),
+  return fetch(`${Endpoint}${pathWithID || path}`, option).then(res =>
+    res.ok
+      ? res.json()
+      : res.text().then(text => {
+          throw new APIError(
+            method,
+            res.url,
+            res.status,
+            res.statusText,
+            res.ok,
+            res.redirected,
+            res.type,
+            text,
+          )
+        }),
   )
 }
 

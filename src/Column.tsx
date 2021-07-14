@@ -1,67 +1,48 @@
 import React, { useState } from 'react'
 import styled from 'styled-components'
-import { useSelector } from 'react-redux'
+import { useSelector, shallowEqual } from 'react-redux'
 import * as color from './color'
 import { Card } from './Card'
 import { PlusIcon } from './icon'
 import { InputForm as _InputForm } from './InputForm'
-import { CardID } from './api'
+import { ColumnID } from './api'
 
-export function Column({
-  title,
-  cards: rawCards,
-  onCardDragStart,
-  onCardDrop,
-  onCardDeleteClick,
-  text,
-  onTextChange,
-  onTextConfirm,
-  onTextCancel,
-}: {
-  title?: string //?がつくと省略可能を表す
-  cards?: {
-    id: CardID
-    text?: string
-  }[]
-  onCardDragStart?(id: CardID): void
-  onCardDrop?(entered: CardID | null): void
-  onCardDeleteClick?(id: CardID): void
-  text?: string
-  onTextChange?(value: string): void
-  onTextConfirm?(): void
-  onTextCancel?(): void
-}) {
-  const filterValue = useSelector(state => state.filterValue.trim()) // 検索文字から空白を除去
-  // filterValueをtoLowerCaseで全て小文字に変換 正規表現とsplit()で空白ごとに区切った配列を作成
-  // ?? をつけることで左辺がnullかundefinedのときだけ右辺（ここでは空配列）を返す
-  const keywords = filterValue.toLowerCase().split(/\s+/g) ?? []
-  // textはrawCardsのtext要素
-  // 小文字に変換 小文字に変換したtextのなかにkeywordsの全要素の文字列が含まれるかチェック（含まれればtrue）
-  // rawCardsの全要素分、上記操作を繰り返し、trueになった要素だけで配列を作りcardsに代入
-  const cards = rawCards?.filter(({ text }) =>
-    keywords?.every(w => text?.toLowerCase().includes(w)),
+export function Column({ id: columnID }: { id: ColumnID }) {
+  const { column, cards, filtered, totalCount } = useSelector(
+    state => {
+      const filterValue = state.filterValue.trim()
+      const filtered = Boolean(filterValue)
+      // filterValueをtoLowerCaseで全て小文字に変換 正規表現とsplit()で空白ごとに区切った配列を作成
+      // ?? をつけることで左辺がnullかundefinedのときだけ右辺（ここでは空配列）を返す
+      const keywords = filterValue.toLowerCase().split(/\s+/g)
+      // textはrawCardsのtext要素
+      // 小文字に変換 小文字に変換したtextのなかにkeywordsの全要素の文字列が含まれるかチェック（含まれればtrue）
+      // rawCardsの全要素分、上記操作を繰り返し、trueになった要素だけで配列を作りcardsに代入
+      const { title, cards: rawCards } =
+        state.columns?.find(c => c.id === columnID) ?? {}
+      const column = { title }
+      const cards = rawCards
+        ?.filter(({ text }) =>
+          keywords.every(w => text?.toLowerCase().includes(w)),
+        )
+        .map(c => c.id)
+      const totalCount = rawCards?.length ?? -1
+
+      return { column, cards, filtered, totalCount }
+    },
+    (left, right) =>
+      Object.keys(left).every(key => shallowEqual(left[key], right[key])),
   )
-  const totalCount = rawCards?.length ?? -1
+  const draggingCardID = useSelector(state => state.draggingCardID)
 
   const [inputMode, setInputMode] = useState(false) // inputFormの表示・非表示のstate
   const toggleInput = () => setInputMode(v => !v) // inputFormの表示・非表示のstateを操作
-  const confirmInput = () => {
-    onTextConfirm?.()
-  }
-  const cancelInput = () => {
-    setInputMode(false)
-    onTextCancel?.()
-  }
+  const cancelInput = () => setInputMode(false)
 
-  // stateの型を指定する書き方 draggingCardIDの型はstringだが、初期値がundefinedなので、stringにもなることが推論できないから
-  // string型かundefined型のどちらかというように与える必要がある
-  const [draggingCardID, setDraggingCardID] = useState<CardID | undefined>(
-    undefined,
-  )
-  const handleCardDragStart = (id: CardID) => {
-    setDraggingCardID(id)
-    onCardDragStart?.(id)
+  if (!column) {
+    return null
   }
+  const { title } = column
 
   return (
     <Container>
@@ -72,47 +53,35 @@ export function Column({
         <AddButton onClick={toggleInput} />
       </Header>
 
-      {inputMode && (
-        <InputForm
-          value={text}
-          onChange={onTextChange}
-          onConfirm={confirmInput}
-          onCancel={cancelInput}
-        />
-      )}
+      {inputMode && <InputForm columnID={columnID} onCancel={cancelInput} />}
 
       {!cards ? (
         <Loading />
       ) : (
         <>
-          {filterValue && <ResultCount>{cards.length} results</ResultCount>}
+          {filtered && <ResultCount>{cards.length} results</ResultCount>}
 
           <VerticalScroll>
-            {cards.map(({ id, text }, i) => (
+            {cards.map((id, i) => (
               <Card.DropArea
                 key={id}
+                targetID={id}
                 disabled={
                   draggingCardID !== undefined &&
-                  (id === draggingCardID || cards[i - 1]?.id === draggingCardID)
+                  (id === draggingCardID || cards[i - 1] === draggingCardID)
                 }
-                onDrop={() => onCardDrop?.(id)}
               >
-                <Card
-                  text={text}
-                  onDragStart={() => handleCardDragStart(id)}
-                  onDragEnd={() => setDraggingCardID(undefined)}
-                  onDeleteClick={() => onCardDeleteClick?.(id)}
-                />
+                <Card id={id} />
               </Card.DropArea>
             ))}
 
             <Card.DropArea
+              targetID={columnID}
               style={{ height: '100%' }}
               disabled={
                 draggingCardID !== undefined &&
-                cards[cards.length - 1]?.id === draggingCardID
+                cards[cards.length - 1] === draggingCardID
               }
-              onDrop={() => onCardDrop?.(null)}
             />
           </VerticalScroll>
         </>
